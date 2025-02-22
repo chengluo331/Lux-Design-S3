@@ -10,14 +10,14 @@ env = SingleAgentWrapper(env, 'player_0', Agent)
 # env = RecordEpisode(env, save_dir="episodes")
 
 
-check_env(env)
+# check_env(env)
 
 env_params = EnvParams(map_type=0, max_steps_in_match=100)
 
 
 # obs, info = env.reset(seed=1, options=dict(params=env_params))
 
-def evaluate_single_agents(opp_agent_cls, seed=42, games_to_play=3, replay_save_dir="replays"):
+def evaluate_single_agents(opp_agent_cls, seed=42, games_to_play=3, replay_save_dir="logs/replays"):
     env = SingleAgentWrapper(
         RecordEpisode(
             LuxAIS3GymEnv(numpy_output=True),
@@ -43,10 +43,10 @@ def evaluate_single_agents(opp_agent_cls, seed=42, games_to_play=3, replay_save_
             # actions: {p0:..., p1: ...}
 
             # random action:
-            # action = env.action_space.sample()
+            action = env.action_space.sample()
 
             # sample agent action
-            action = agent.act(step=step, obs=env.backout_obs(obs))
+            # action = agent.act(step=step, obs=env.backout_obs(obs))
 
             obs, reward, terminated, truncated, info = env.step(action)
             # info["state"] is the environment state object, you can inspect/play around with it to e.g. print

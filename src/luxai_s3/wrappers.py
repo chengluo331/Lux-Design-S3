@@ -129,6 +129,33 @@ class LuxAIS3GymEnv(gym.Env):
 
 # TODO: vectorized gym wrapper
 
+class RewardSpace:
+    def __init__(self, player):
+        self.player = player
+        self.opp_player = "player_1" if self.player == "player_0" else "player_0"
+        self.player_n = 0 if self.player == "player_0" else 1
+        self.team_wins = 0.
+        self.team_points = 0.
+
+    def reset(self):
+        self.team_wins = 0.
+        self.team_points = 0.
+
+    def calculate(self, obs):
+        result = 0.
+        obs_player = obs[self.player]
+
+        new_team_points = obs_player['team_points'][self.player_n]
+        result += (new_team_points - self.team_points)
+        self.team_points = new_team_points
+
+        new_team_wins = obs_player['team_wins'][self.player_n]
+        result += (new_team_wins - self.team_wins) * 100.
+        self.team_wins = new_team_wins
+
+        return result
+
+
 class SingleAgentWrapper(gym.Wrapper):
     def __init__(self, env: LuxAIS3GymEnv, player: str, opp_agent_class):
         super().__init__(env)
@@ -143,6 +170,7 @@ class SingleAgentWrapper(gym.Wrapper):
         self._metadata = unwrapped_env.metadata
 
         self.player = player
+        self._reward_space = RewardSpace(player)
 
         # TODO: replace opponent agent with self trained
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
@@ -168,20 +196,20 @@ class SingleAgentWrapper(gym.Wrapper):
 
         # gspc.Dict({
         #     "units_position": gspc.Box(low=-1, high=max(width, height) - 1, shape=(num_teams, max_units, 2),
-        #                           dtype=np.int32),
+        #                                dtype=np.int32),
         #     "units_energy": gspc.Box(low=-1, high=max_energy, shape=(num_teams, max_units), dtype=np.int32),
         #     "units_mask": gspc.Box(low=0, high=1, shape=(num_teams, max_units), dtype=np.int8),
         #     "sensor_mask": gspc.Box(low=0, high=1, shape=(width, height), dtype=np.int8),
         #     "map_features_energy": gspc.Box(low=min(-1, min_energy_tile), high=max_energy_tile,
-        #                                shape=(width, height),
-        #                                dtype=np.float32),
+        #                                     shape=(width, height),
+        #                                     dtype=np.float32),
         #     "map_features_tile_type": gspc.Box(low=-1, high=2, shape=(width, height), dtype=np.int32),
         #     "relic_nodes_mask": gspc.Box(low=0, high=1, shape=(max_relics,), dtype=np.int32),
         #     "relic_nodes": gspc.Box(low=-1, high=max(width, height) - 1, shape=(max_relics, 2), dtype=np.int32),
         #     "team_points": gspc.Box(low=0, high=max_points, shape=(num_teams,), dtype=np.int32),
         #     "team_wins": gspc.Box(low=0, high=match_per_episode, shape=(num_teams,), dtype=np.int32),
-        #     "steps": gspc.Discrete(max_steps),  # Assuming an upper limit for steps
-        #     "match_steps": gspc.Discrete(match_per_episode * max_steps)
+        #     "steps": gspc.Discrete(match_per_episode * (max_steps + 1) + 1),  # Assuming an upper limit for steps
+        #     "match_steps": gspc.Discrete(max_steps + 1)
         # })
         return gspc.Dict({
             "units_position": gspc.Box(low=-1, high=max(width, height) - 1, shape=(num_teams, max_units, 2),
@@ -197,8 +225,8 @@ class SingleAgentWrapper(gym.Wrapper):
             "relic_nodes": gspc.Box(low=-1, high=max(width, height) - 1, shape=(max_relics, 2), dtype=np.int32),
             "team_points": gspc.Box(low=0, high=max_points, shape=(num_teams,), dtype=np.int32),
             "team_wins": gspc.Box(low=0, high=match_per_episode, shape=(num_teams,), dtype=np.int32),
-            "steps": gspc.Discrete(match_per_episode * (max_steps+1)+1),  # Assuming an upper limit for steps
-            "match_steps": gspc.Discrete(max_steps+1)
+            "steps": gspc.Discrete(match_per_episode * (max_steps + 1) + 1),  # Assuming an upper limit for steps
+            "match_steps": gspc.Discrete(max_steps + 1)
         })
 
     # Taking OBS from lux env (original obs) and transform to obs for training
@@ -249,6 +277,8 @@ class SingleAgentWrapper(gym.Wrapper):
             self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
         obs, info = self.env.reset(seed=seed, options=options)
+        self._reward_space.reset()
+
         self.opp_agent = self.opp_agent_class(player=self.opp_player, env_cfg=info["params"])
         self.steps = 0
         self.last_obs = obs[self.opp_player]
@@ -264,22 +294,16 @@ class SingleAgentWrapper(gym.Wrapper):
         my_action = action.reshape(self.env.unwrapped.env_params.max_units, -1)
 
         opp_action = self.opp_agent.act(self.steps, self.last_obs)
-        obs, reward, terminated, truncated, info = self.env.step(
+        obs, _, terminated, truncated, info = self.env.step(
             {self.player: my_action, self.opp_player: opp_action}
         )
         self.steps += 1
         self.last_obs = obs[self.opp_player]
 
-        terminated_players = {k: terminated[k] for k in terminated}
-        terminated_player = terminated_players["player_0"] or terminated_players["player_1"]
-
-        truncated_players = {k: truncated[k] for k in truncated}
-        truncated_player = truncated_players["player_0"] or truncated_players["player_1"]
-
         return (self._env_obs_to_my_obs(obs),
-                reward[self.player].tolist(),
-                terminated_player.tolist(),
-                truncated_player.tolist(),
+                self._reward_space.calculate(obs),
+                terminated[self.player].tolist(),
+                truncated[self.player].tolist(),
                 info)
 
 
