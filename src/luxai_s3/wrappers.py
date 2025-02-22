@@ -7,6 +7,7 @@ import flax.serialization
 import gymnasium as gym
 import gymnax
 import gymnax.environments.spaces
+from gymnasium.spaces import MultiDiscrete
 import jax
 import numpy as np
 import dataclasses
@@ -14,6 +15,36 @@ from luxai_s3.env import LuxAIS3Env
 from luxai_s3.params import EnvParams, env_params_ranges
 from luxai_s3.state import serialize_env_actions, serialize_env_states
 from luxai_s3.utils import to_numpy
+import jax.numpy as jnp
+from gymnax.environments.spaces import Box, Discrete, Dict, Tuple, Space
+
+gspc = gym.spaces
+
+
+def gymnax_space_to_gym_space(space: Space) -> gspc.Space:
+    """Convert Gymnax space to equivalent Gym space."""
+    if isinstance(space, Discrete):
+        return gspc.Discrete(space.n)
+    elif isinstance(space, Box):
+        low = (
+            float(space.low)
+            if (np.isscalar(space.low) or space.low.size == 1)
+            else np.array(space.low)
+        )
+        high = (
+            float(space.high)
+            if (np.isscalar(space.high) or space.low.size == 1)
+            else np.array(space.high)
+        )
+        return gspc.Box(low, high, space.shape, space.dtype)
+    elif isinstance(space, Dict):
+        return gspc.Dict({k: gymnax_space_to_gym_space(v) for k, v in space.spaces.items()})
+    elif isinstance(space, Tuple):
+        return gspc.Tuple(space.spaces)
+    else:
+        raise NotImplementedError(
+            f"Conversion of {space.__class__.__name__} not supported"
+        )
 
 
 class LuxAIS3GymEnv(gym.Env):
@@ -38,7 +69,7 @@ class LuxAIS3GymEnv(gym.Env):
         self.jax_env.render(self.state, self.env_params)
 
     def reset(
-        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+            self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
         if seed is not None:
             self.rng_key = jax.random.key(seed)
@@ -81,7 +112,7 @@ class LuxAIS3GymEnv(gym.Env):
         )
 
     def step(
-        self, action: Any
+            self, action: Any
     ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
         self.rng_key, step_key = jax.random.split(self.rng_key)
         obs, self.state, reward, terminated, truncated, info = self.jax_env.step(
@@ -98,14 +129,167 @@ class LuxAIS3GymEnv(gym.Env):
 
 # TODO: vectorized gym wrapper
 
+class SingleAgentWrapper(gym.Wrapper):
+    def __init__(self, env: LuxAIS3GymEnv, player: str, opp_agent_class):
+        super().__init__(env)
+        # original action space from lux env but box space gives floating number in RL training
+        # self.action_space = self.env.action_space[player]
+        unwrapped_env = self.env.unwrapped
+        unit_sap_range = unwrapped_env.env_params.unit_sap_range
+        self.action_space = MultiDiscrete([5, unit_sap_range, unit_sap_range] * unwrapped_env.env_params.max_units,
+                                          dtype=np.int16)
+
+        self.observation_space = self._get_observation_space()
+        self._metadata = unwrapped_env.metadata
+
+        self.player = player
+
+        # TODO: replace opponent agent with self trained
+        self.opp_player = "player_1" if self.player == "player_0" else "player_0"
+        self.opp_agent_class = opp_agent_class
+        self.opp_agent = None
+        self.steps = 0
+        self.last_obs = None
+
+    def _get_observation_space(self):
+        params = self.env.unwrapped.env_params
+        width = params.map_width
+        height = params.map_height
+        num_teams = params.num_teams
+        max_units = params.max_units
+        max_relics = params.max_relic_nodes
+        # min_energy = params.min_unit_energy
+        max_energy = params.max_unit_energy
+        min_energy_tile = params.min_energy_per_tile
+        max_energy_tile = params.max_energy_per_tile
+        max_points = 1000
+        match_per_episode = params.match_count_per_episode
+        max_steps = params.max_steps_in_match
+
+        # gspc.Dict({
+        #     "units_position": gspc.Box(low=-1, high=max(width, height) - 1, shape=(num_teams, max_units, 2),
+        #                           dtype=np.int32),
+        #     "units_energy": gspc.Box(low=-1, high=max_energy, shape=(num_teams, max_units), dtype=np.int32),
+        #     "units_mask": gspc.Box(low=0, high=1, shape=(num_teams, max_units), dtype=np.int8),
+        #     "sensor_mask": gspc.Box(low=0, high=1, shape=(width, height), dtype=np.int8),
+        #     "map_features_energy": gspc.Box(low=min(-1, min_energy_tile), high=max_energy_tile,
+        #                                shape=(width, height),
+        #                                dtype=np.float32),
+        #     "map_features_tile_type": gspc.Box(low=-1, high=2, shape=(width, height), dtype=np.int32),
+        #     "relic_nodes_mask": gspc.Box(low=0, high=1, shape=(max_relics,), dtype=np.int32),
+        #     "relic_nodes": gspc.Box(low=-1, high=max(width, height) - 1, shape=(max_relics, 2), dtype=np.int32),
+        #     "team_points": gspc.Box(low=0, high=max_points, shape=(num_teams,), dtype=np.int32),
+        #     "team_wins": gspc.Box(low=0, high=match_per_episode, shape=(num_teams,), dtype=np.int32),
+        #     "steps": gspc.Discrete(max_steps),  # Assuming an upper limit for steps
+        #     "match_steps": gspc.Discrete(match_per_episode * max_steps)
+        # })
+        return gspc.Dict({
+            "units_position": gspc.Box(low=-1, high=max(width, height) - 1, shape=(num_teams, max_units, 2),
+                                       dtype=np.int32),
+            "units_energy": gspc.Box(low=-1, high=max_energy, shape=(num_teams, max_units), dtype=np.int32),
+            "units_mask": gspc.Box(low=0, high=1, shape=(num_teams, max_units), dtype=np.int8),
+            "sensor_mask": gspc.Box(low=0, high=1, shape=(width, height), dtype=np.int8),
+            "map_features_energy": gspc.Box(low=min(-1, min_energy_tile), high=max_energy_tile,
+                                            shape=(width, height),
+                                            dtype=np.float32),
+            "map_features_tile_type": gspc.Box(low=-1, high=2, shape=(width, height), dtype=np.int32),
+            "relic_nodes_mask": gspc.Box(low=0, high=1, shape=(max_relics,), dtype=np.int32),
+            "relic_nodes": gspc.Box(low=-1, high=max(width, height) - 1, shape=(max_relics, 2), dtype=np.int32),
+            "team_points": gspc.Box(low=0, high=max_points, shape=(num_teams,), dtype=np.int32),
+            "team_wins": gspc.Box(low=0, high=match_per_episode, shape=(num_teams,), dtype=np.int32),
+            "steps": gspc.Discrete(match_per_episode * (max_steps+1)+1),  # Assuming an upper limit for steps
+            "match_steps": gspc.Discrete(max_steps+1)
+        })
+
+    # Taking OBS from lux env (original obs) and transform to obs for training
+    def _env_obs_to_my_obs(self, obs):
+        obs_player = obs[self.player]
+        return {
+            'units_position': obs_player['units']['position'],
+            'units_energy': obs_player['units']['energy'],
+            'units_mask': obs_player['units_mask'],
+            'sensor_mask': obs_player['sensor_mask'],
+            'map_features_energy': obs_player['map_features']['energy'],
+            'map_features_tile_type': obs_player['map_features']['tile_type'],
+            'relic_nodes_mask': obs_player['relic_nodes_mask'],
+            'relic_nodes': obs_player['relic_nodes'],
+            'team_points': obs_player['team_points'],
+            'team_wins': obs_player['team_wins'],
+            'steps': obs_player['steps'].tolist(),
+            'match_steps': obs_player['match_steps'].tolist(),
+        }
+
+    # Taking obs for training and transform to lux env original obs (for testing purpose)
+    def backout_obs(self, obs):
+        team_id = 0 if self.player == "player_0" else 1
+
+        def _(v):
+            return [v, 0] if team_id == 0 else [0, v]
+
+        return {
+            'units': {
+                'position': obs['units_position'],
+                'energy': obs['units_energy']
+            },
+            'units_mask': obs['units_mask'],
+            'sensor_mask': obs['sensor_mask'],
+            'map_features': {
+                'energy': obs['map_features_energy'],
+                'tile_type': obs['map_features_tile_type']
+            },
+            'relic_nodes_mask': obs['relic_nodes_mask'],
+            'relic_nodes': obs['relic_nodes'],
+            'team_points': obs['team_points'],
+            'team_wins': obs['team_wins'],
+            'steps': obs['steps'],
+            'match_steps': obs['match_steps'],
+        }
+
+    def reset(
+            self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[Any, dict[str, Any]]:
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.opp_agent = self.opp_agent_class(player=self.opp_player, env_cfg=info["params"])
+        self.steps = 0
+        self.last_obs = obs[self.opp_player]
+        return self._env_obs_to_my_obs(obs), info
+
+    def step(
+            self, action: Any
+    ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
+        """Uses the :meth:`step` of the :attr:`env` that can be overwritten to change the returned data."""
+        # my_action = action
+        # for RL training, action_space is multidiscrete so we need to transform back to the format lux env
+        # can understand
+        my_action = action.reshape(self.env.unwrapped.env_params.max_units, -1)
+
+        opp_action = self.opp_agent.act(self.steps, self.last_obs)
+        obs, reward, terminated, truncated, info = self.env.step(
+            {self.player: my_action, self.opp_player: opp_action}
+        )
+        self.steps += 1
+        self.last_obs = obs[self.opp_player]
+
+        terminated_players = {k: terminated[k] for k in terminated}
+        terminated_player = terminated_players["player_0"] or terminated_players["player_1"]
+
+        truncated_players = {k: truncated[k] for k in truncated}
+        truncated_player = truncated_players["player_0"] or truncated_players["player_1"]
+
+        return (self._env_obs_to_my_obs(obs),
+                reward[self.player].tolist(),
+                terminated_player.tolist(),
+                truncated_player.tolist(),
+                info)
+
 
 class RecordEpisode(gym.Wrapper):
     def __init__(
-        self,
-        env: LuxAIS3GymEnv,
-        save_dir: str = None,
-        save_on_close: bool = True,
-        save_on_reset: bool = True,
+            self,
+            env: LuxAIS3GymEnv,
+            save_dir: str = None,
+            save_on_close: bool = True,
+            save_on_reset: bool = True,
     ):
         super().__init__(env)
         self.episode = dict(states=[], actions=[], metadata=dict())
@@ -120,7 +304,7 @@ class RecordEpisode(gym.Wrapper):
             Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     def reset(
-        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+            self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
         if self.save_on_reset and self.episode_steps > 0:
             self._save_episode_and_reset()
@@ -132,7 +316,7 @@ class RecordEpisode(gym.Wrapper):
         return obs, info
 
     def step(
-        self, action: Any
+            self, action: Any
     ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.episode_steps += 1
