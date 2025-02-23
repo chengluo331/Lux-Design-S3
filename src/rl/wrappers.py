@@ -1,13 +1,12 @@
 from typing import Any, SupportsFloat
 
-from luxai_s3.wrappers import LuxAIS3GymEnv
 import gymnasium as gym
 
 from rl.reward import Reward
 from rl.action import Action
 from rl.observation import Observation
 from rl.player import Players
-from kits.python.agent import Agent
+# from kits.python.agent import Agent
 
 
 class AgentWrapper:
@@ -36,7 +35,7 @@ class RLWrapper(gym.Wrapper):
         self.action_space = self._action.get_space()
         self.observation_space = self._observation.get_space()
 
-        self._opponent_agent = None
+        # self._opponent_agent = None
 
     def reset(
             self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -48,10 +47,10 @@ class RLWrapper(gym.Wrapper):
         self._action.reset()
         self._observation.reset()
 
-        self._opponent_agent = AgentWrapper(
-            Agent(self._players.opp, env_cfg=info["params"]),
-            obs[self._players.opp]
-        )
+        # self._opponent_agent = AgentWrapper(
+        #     Agent(self._players.opp, env_cfg=info["params"]),
+        #     obs[self._players.opp]
+        # )
 
         self._reward.obs = obs[self._players.me]
 
@@ -72,7 +71,7 @@ class RLWrapper(gym.Wrapper):
         )
         reward = self._reward.calculate(obs)
 
-        self._opponent_agent.obs = obs[self._players.opp]
+        # self._opponent_agent.obs = obs[self._players.opp]
         self._reward.obs = obs[self._players.me]
 
         return (self._observation.get_obs(obs),
