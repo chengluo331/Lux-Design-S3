@@ -11,13 +11,13 @@ env = LuxAIS3GymEnv(numpy_output=True)
 env = RecordEpisode(env, save_dir="episodes")
 env = RLWrapper(env=env)
 
-check_env(env)
-
+# check_env(env)
 
 # from stable_baselines3 import PPO
-# rl_agent = PPO.load('./models/ppo_baseline.bin')
+rl_agent = PPO.load('./models/ppo_baseline.bin')
 
-def evaluate_single_agents(seed=42, games_to_play=3, replay_save_dir="logs/replays"):
+
+def evaluate_single_agents(seed=42, games_to_play=100, replay_save_dir="logs/replays"):
     env = RLWrapper(
         RecordEpisode(
             LuxAIS3GymEnv(numpy_output=True),
@@ -36,7 +36,8 @@ def evaluate_single_agents(seed=42, games_to_play=3, replay_save_dir="logs/repla
         # main game loop
         game_done = False
         step = 0
-        print(f"Running game {i}")
+        # print(f"Running game {i}")
+        total_reward = 0
         while not game_done:
             # actions = dict()
             # for agent in [player_0, player_1]:
@@ -56,6 +57,11 @@ def evaluate_single_agents(seed=42, games_to_play=3, replay_save_dir="logs/repla
             # info["state"] is the environment state object, you can inspect/play around with it to e.g. print
             # unobservable game data that agents can't see
             game_done = terminated or truncated
+
+            total_reward += reward
+            if game_done:
+                print(f"{info['final_state'].team_wins[env._players.me_n].tolist()},{total_reward}")
+
             step += 1
     env.close()  # free up resources and save final replay
 

@@ -43,39 +43,39 @@ class RLWrapper(gym.Wrapper):
         obs, info = self.env.reset(seed=seed, options=options)
 
         self._players.reset()
-        self._reward.reset()
+        self._reward.reset(self._players)
         self._action.reset()
-        self._observation.reset()
+        self._observation.reset(self._players)
 
         # self._opponent_agent = AgentWrapper(
         #     Agent(self._players.opp, env_cfg=info["params"]),
         #     obs[self._players.opp]
         # )
-
-        self._reward.obs = obs[self._players.me]
-
-        return self._observation.get_obs(obs), info
+        self._observation.last_global_obs = obs
+        return self._observation.get_obs(), info
 
     def step(
             self, action: Any
     ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
+        last_global_obs = self._observation.last_global_obs
         my_action = self._action.get_action(action)
+
         # opp_action = self._opponent_agent.get_action()
         opp_action = self._action.get_action(self.action_space.sample())
 
         me = self._players.me
         opp = self._players.opp
 
-        obs, _, terminated, truncated, info = self.env.step(
+        global_obs, _, terminated, truncated, info = self.env.step(
             {me: my_action, opp: opp_action}
         )
-        reward = self._reward.calculate(obs)
+        reward = self._reward.calculate(last_global_obs, global_obs)
+        self._observation.last_global_obs = global_obs
 
         # self._opponent_agent.obs = obs[self._players.opp]
-        self._reward.obs = obs[self._players.me]
 
-        return (self._observation.get_obs(obs),
+        return (self._observation.get_obs(),
                 reward,
                 terminated[me].tolist(),
-                truncated[opp].tolist(),
+                truncated[me].tolist(),
                 info)
