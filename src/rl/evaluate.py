@@ -14,7 +14,7 @@ env = RLWrapper(env=env)
 # check_env(env)
 
 # from stable_baselines3 import PPO
-rl_agent = PPO.load('./models/ppo_baseline.bin')
+# rl_agent = PPO.load('./logs/models/baseline.bin')
 
 
 def evaluate_single_agents(seed=42, games_to_play=100, replay_save_dir="logs/replays"):

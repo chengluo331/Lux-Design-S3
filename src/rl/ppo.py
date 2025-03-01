@@ -25,17 +25,17 @@ eval_callback = EvalCallback(env,
                              eval_freq=400,
                              verbose=1)
 
-log_path = "logs/ppo_logs/v6"
+log_path = "logs/ppo_logs/v3"
 tensorboard = configure(log_path, ["tensorboard"])
 # tensorboard = configure(log_path, ["stdout", "tensorboard"])
 
 # n_step = num steps * num game in eposode
 # batch_size = n_env*n_step / 2
-model = PPO("MultiInputPolicy", env, n_steps=404, batch_size=808, learning_rate=1e-4, verbose=1,
+model = PPO("MultiInputPolicy", env, n_steps=404, batch_size=808, learning_rate=1e-5, verbose=1,
             clip_range_vf=0.2, ent_coef=0.1)
 # model = PPO.load("./logs/best/best_model.zip", env=env)
 
 model.set_logger(tensorboard)
 
 model.learn(total_timesteps=1_000_000, callback=eval_callback, reset_num_timesteps=False)
-model.save('models/ppo_baseline.bin')
+model.save('logs/models/baseline.bin')

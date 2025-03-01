@@ -25,7 +25,7 @@ class Reward:
         new_opp_team_wins = obs_player['team_wins'][self.players.opp_n]
         result -= (new_opp_team_wins - pre_opp_team_wins)
 
-        # reward team point
+        # # reward team point
         pre_team_points = last_obs_player['team_points'][self.players.me_n]
         new_team_points = obs_player['team_points'][self.players.me_n]
         result += (new_team_points - pre_team_points)*0.1
@@ -52,7 +52,7 @@ class Reward:
         current_relics = np.sum(current_obs_dict['relic_nodes'])
         last_relics = np.sum(last_obs_dict['relic_nodes'])
         if current_relics > last_relics:
-            result += (current_relics - last_relics) / self.env_params.max_relic_nodes * 10.
+            result += (current_relics - last_relics) / self.env_params.max_relic_nodes
 
         # reward staying around relic
         kernel = np.ones((5, 5), dtype=np.int8)
@@ -64,15 +64,16 @@ class Reward:
         convolved = convolve(current_obs_dict['relic_nodes'], kernel, mode='constant', cval=0)
         points_range = (convolved > 0).astype(np.int8)
         current_unit_points = np.sum(current_obs_dict['units_position'] * points_range)
-        result += (current_unit_points - last_unit_points)
+        if current_unit_points > last_unit_points:
+            result += (current_unit_points - last_unit_points)
 
         # reward energy node
         current_energy = np.sum(current_obs_dict['map_features_energy'] * current_obs_dict['units_position'])
         last_energy = np.sum(last_obs_dict['map_features_energy'] * last_obs_dict['units_position'])
-        result += (current_energy - last_energy) * 0.001
+        result += (current_energy - last_energy) * 0.01
 
         # reward/penalise unit energy
         unit_energy_diff = np.sum(current_obs_dict["units_energy"] - last_obs_dict["units_energy"])
-        result += unit_energy_diff * 0.001
+        result += unit_energy_diff * 0.01
 
         return result
