@@ -18,11 +18,10 @@ env = DummyVecEnv([lambda: Monitor(RLWrapper(LuxAIS3GymEnv(numpy_output=True))) 
 env = VecNormalize(env, norm_reward=True, norm_obs=False)
 
 # Stop training when the model reaches the reward threshold
-callback_on_best = StopTrainingOnNoModelImprovement(max_no_improvement_evals=100, min_evals=10_000, verbose=1)
+callback_on_best = StopTrainingOnNoModelImprovement(max_no_improvement_evals=10, min_evals=10_000, verbose=1)
 eval_callback = EvalCallback(env,
                              best_model_save_path="logs/best",
                              callback_after_eval=callback_on_best,
-                             eval_freq=400,
                              verbose=1)
 
 log_path = "logs/ppo_logs/v3"
@@ -37,5 +36,5 @@ model = PPO("MultiInputPolicy", env, n_steps=505, batch_size=1010, learning_rate
 
 model.set_logger(tensorboard)
 
-model.learn(total_timesteps=1_000_000, callback=eval_callback, reset_num_timesteps=False)
+model.learn(total_timesteps=5_000_000, callback=eval_callback, reset_num_timesteps=False)
 model.save('logs/models/baseline.bin')
