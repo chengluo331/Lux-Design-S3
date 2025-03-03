@@ -8,6 +8,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, SubprocV
 
 from luxai_s3.wrappers import LuxAIS3GymEnv
 from rl.wrappers import RLWrapper
+from rl.extractor import CustomBoardFeatureExtractor
 
 env = RLWrapper(LuxAIS3GymEnv(numpy_output=True))
 check_env(env)
@@ -24,14 +25,19 @@ eval_callback = EvalCallback(env,
                              callback_after_eval=callback_on_best,
                              verbose=1)
 
-log_path = "logs/ppo_logs/v3"
+log_path = "logs/ppo_logs/v0"
 tensorboard = configure(log_path, ["tensorboard"])
 # tensorboard = configure(log_path, ["stdout", "tensorboard"])
 
 # n_step = num steps * num game in episode
 # batch_size = n_env*n_step / 2
-model = PPO("MultiInputPolicy", env, n_steps=505, batch_size=1010, learning_rate=1e-4, verbose=1,
-            clip_range_vf=0.2, ent_coef=0.1)
+policy_kwargs = dict(
+    features_extractor_class=CustomBoardFeatureExtractor,
+    features_extractor_kwargs=dict(features_dim=256)
+)
+
+model = PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs, n_steps=505, batch_size=1010, learning_rate=1e-4,
+            verbose=1, clip_range_vf=0.2, ent_coef=0.1)
 # model = PPO.load("./logs/best/best_model.zip", env=env)
 
 model.set_logger(tensorboard)
